@@ -2,7 +2,7 @@ import React, { useRef, useState } from "react";
 import io from "socket.io-client";
 import "./App.css";
 
-const socket = io("http://192.168.1.9:3001");
+const socket = io("https://webrtc-video-chat-c0cu.onrender.com");
 
 function App() {
   const [roomId, setRoomId] = useState("");
