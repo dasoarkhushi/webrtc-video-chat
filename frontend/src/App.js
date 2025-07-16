@@ -17,7 +17,7 @@ function App() {
   const localStream = useRef(null);
 
   const config = {
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
   };
 
   const toggleAudio = () => {
@@ -53,9 +53,11 @@ function App() {
       socket.on("ready", async () => {
         setMessage("Another user has joined the room.");
         peerConnection.current = createPeerConnection();
+
         localStream.current.getTracks().forEach(track =>
           peerConnection.current.addTrack(track, localStream.current)
         );
+
         const offer = await peerConnection.current.createOffer();
         await peerConnection.current.setLocalDescription(offer);
         socket.emit("offer", offer, roomId);
@@ -63,22 +65,27 @@ function App() {
 
       socket.on("offer", async (offer) => {
         peerConnection.current = createPeerConnection();
-        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+
         localStream.current.getTracks().forEach(track =>
           peerConnection.current.addTrack(track, localStream.current)
         );
+
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
         const answer = await peerConnection.current.createAnswer();
         await peerConnection.current.setLocalDescription(answer);
         socket.emit("answer", answer, roomId);
       });
 
-      socket.on("answer", answer =>
-        peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer))
-      );
+      socket.on("answer", answer => {
+        peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
+      });
 
-      socket.on("ice-candidate", candidate =>
-        peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate))
-      );
+      socket.on("ice-candidate", candidate => {
+        if (peerConnection.current) {
+          peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+      });
+
     } catch (error) {
       console.error(error);
       alert("Permission denied or media devices error.");
@@ -87,14 +94,24 @@ function App() {
 
   const createPeerConnection = () => {
     const pc = new RTCPeerConnection(config);
+
     pc.onicecandidate = e => {
       if (e.candidate) {
         socket.emit("ice-candidate", e.candidate, roomId);
       }
     };
+
     pc.ontrack = e => {
-      remoteVideoRef.current.srcObject = e.streams[0];
+      console.log("Received remote stream");
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = e.streams[0];
+      }
     };
+
+    pc.onnegotiationneeded = async () => {
+      console.log("Negotiation needed");
+    };
+
     return pc;
   };
 
