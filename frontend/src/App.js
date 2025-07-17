@@ -1,7 +1,8 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import io from "socket.io-client";
 import "./App.css";
 
+// Connect to your signaling server
 const socket = io("https://webrtc-video-chat-c0cu.onrender.com");
 
 function App() {
@@ -17,7 +18,12 @@ function App() {
   const localStream = useRef(null);
 
   const config = {
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    iceServers: [
+      {
+        urls: "stun:stun.l.google.com:19302"
+        // Add TURN server here for production use
+      },
+    ],
   };
 
   const toggleAudio = () => {
@@ -38,7 +44,7 @@ function App() {
 
   const joinRoom = async () => {
     if (!roomId.trim()) return;
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    if (!navigator.mediaDevices?.getUserMedia) {
       alert("Browser does not support media devices.");
       return;
     }
@@ -47,16 +53,22 @@ function App() {
       setJoined(true);
       socket.emit("join", roomId);
 
-      localStream.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      localVideoRef.current.srcObject = localStream.current;
+      localStream.current = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream.current;
+      }
 
       socket.on("ready", async () => {
         setMessage("Another user has joined the room.");
         peerConnection.current = createPeerConnection();
 
-        localStream.current.getTracks().forEach(track =>
-          peerConnection.current.addTrack(track, localStream.current)
-        );
+        localStream.current.getTracks().forEach(track => {
+          peerConnection.current.addTrack(track, localStream.current);
+        });
 
         const offer = await peerConnection.current.createOffer();
         await peerConnection.current.setLocalDescription(offer);
@@ -70,24 +82,31 @@ function App() {
           peerConnection.current.addTrack(track, localStream.current)
         );
 
-        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+        await peerConnection.current.setRemoteDescription(
+          new RTCSessionDescription(offer)
+        );
+
         const answer = await peerConnection.current.createAnswer();
         await peerConnection.current.setLocalDescription(answer);
         socket.emit("answer", answer, roomId);
       });
 
-      socket.on("answer", answer => {
-        peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
+      socket.on("answer", async (answer) => {
+        await peerConnection.current.setRemoteDescription(
+          new RTCSessionDescription(answer)
+        );
       });
 
-      socket.on("ice-candidate", candidate => {
-        if (peerConnection.current) {
-          peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+      socket.on("ice-candidate", async (candidate) => {
+        try {
+          await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.error("Error adding received ice candidate", err);
         }
       });
 
     } catch (error) {
-      console.error(error);
+      console.error("Media access error:", error);
       alert("Permission denied or media devices error.");
     }
   };
@@ -95,21 +114,27 @@ function App() {
   const createPeerConnection = () => {
     const pc = new RTCPeerConnection(config);
 
-    pc.onicecandidate = e => {
+    pc.onicecandidate = (e) => {
       if (e.candidate) {
         socket.emit("ice-candidate", e.candidate, roomId);
       }
     };
 
-    pc.ontrack = e => {
-      console.log("Received remote stream");
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = e.streams[0];
+    pc.ontrack = (event) => {
+      console.log("Received remote track:", event.streams);
+      if (remoteVideoRef.current && event.streams[0]) {
+        remoteVideoRef.current.srcObject = event.streams[0];
+      } else {
+        console.warn("Remote video element not ready or stream missing");
       }
     };
 
-    pc.onnegotiationneeded = async () => {
-      console.log("Negotiation needed");
+    pc.onconnectionstatechange = () => {
+      console.log("Connection State:", pc.connectionState);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log("ICE Connection State:", pc.iceConnectionState);
     };
 
     return pc;
@@ -118,6 +143,7 @@ function App() {
   return (
     <div className="container">
       <h2>Peer-to-Peer Video Chat</h2>
+
       {!joined ? (
         <div className="join-section">
           <input
@@ -132,12 +158,25 @@ function App() {
         <>
           {message && <p className="message">{message}</p>}
           <div className="video-grid">
-            <video ref={localVideoRef} autoPlay muted playsInline></video>
-            <video ref={remoteVideoRef} autoPlay playsInline></video>
+            <video
+              ref={localVideoRef}
+              autoPlay
+              muted
+              playsInline
+            />
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+            />
           </div>
           <div className="control-panel">
-            <button onClick={toggleAudio}>{audioOn ? "Mute Audio" : "Unmute Audio"}</button>
-            <button onClick={toggleVideo}>{videoOn ? "Turn Off Video" : "Turn On Video"}</button>
+            <button onClick={toggleAudio}>
+              {audioOn ? "Mute Audio" : "Unmute Audio"}
+            </button>
+            <button onClick={toggleVideo}>
+              {videoOn ? "Turn Off Video" : "Turn On Video"}
+            </button>
           </div>
         </>
       )}
